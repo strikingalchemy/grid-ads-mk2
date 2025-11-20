@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import sequelize from './config/database';
 import { getAds, createAd, updateAd, deleteAd, getStorefrontAds, getCategories, updateStoreConfig } from './controllers/adController';
+import { getSdk } from './controllers/sdkController';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -12,7 +13,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-store-hash']
 }));
 
 app.use(helmet());
@@ -20,20 +21,11 @@ app.use(express.json());
 
 // -- Routes --
 
-// Root route
-app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    service: 'GridAds API',
-    version: '1.0.0'
-  });
-});
-
-// Health Check
-app.get('/health', (req, res) => res.json({ status: 'healthy' }));
-
 // Storefront Public API
 app.get('/storefront/:storeHash/ads', getStorefrontAds);
+
+// Serve SDK dynamically
+app.get('/sdk/v1/injector.js', getSdk);
 
 // Admin API
 app.get('/api/ads', getAds);
@@ -42,6 +34,9 @@ app.put('/api/ads/:id', updateAd);
 app.delete('/api/ads/:id', deleteAd);
 app.get('/api/categories', getCategories);
 app.post('/api/config', updateStoreConfig);
+
+// Health Check
+app.get('/health', (req, res) => res.send('OK'));
 
 // Start Server
 const start = async () => {
@@ -54,8 +49,9 @@ const start = async () => {
     });
   } catch (error) {
     console.error('Unable to connect to the database:', error);
-    process.exit(1);
+    (process as any).exit(1);
   }
 };
 
 start();
+    
