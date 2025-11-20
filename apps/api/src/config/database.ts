@@ -15,17 +15,10 @@ const pgUser = process.env.PGUSER;
 const pgPassword = process.env.PGPASSWORD;
 const pgDatabase = process.env.PGDATABASE;
 
-console.log('Database Configuration:');
-console.log('- NODE_ENV:', process.env.NODE_ENV);
-console.log('- DATABASE_URL exists:', !!databaseUrl);
-console.log('- PGHOST exists:', !!pgHost);
-console.log('- Using SSL:', isProduction);
-
 let sequelize: Sequelize;
 
 if (databaseUrl) {
   // Use DATABASE_URL (Railway, Heroku, etc.)
-  console.log('Connecting with DATABASE_URL...');
   sequelize = new Sequelize(databaseUrl, {
     dialect: 'postgres',
     logging: false,
@@ -44,7 +37,6 @@ if (databaseUrl) {
   });
 } else if (pgHost && pgUser && pgPassword && pgDatabase) {
   // Use Railway's individual Postgres variables
-  console.log('Connecting with Railway PGHOST variables...');
   sequelize = new Sequelize(pgDatabase, pgUser, pgPassword, {
     host: pgHost,
     port: pgPort ? parseInt(pgPort) : 5432,
@@ -65,7 +57,6 @@ if (databaseUrl) {
   });
 } else {
   // Fall back to custom environment variables (local development)
-  console.log('Connecting with custom env vars...');
   sequelize = new Sequelize(
     process.env.DB_NAME || 'gridads',
     process.env.DB_USER || 'postgres',
