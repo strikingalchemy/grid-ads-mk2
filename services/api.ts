@@ -2,16 +2,27 @@
 import { AdConfig, Category } from '../types';
 import { MOCK_ADS, MOCK_CATEGORIES } from './mockData';
 
+const PRODUCTION_API = 'https://grid-ads-mk2-production.up.railway.app';
+
 const getApiBase = () => {
     const stored = localStorage.getItem('gridads_api_url');
-    const base = stored ? stored.replace(/\/$/, '') : 'http://localhost:3000';
+    const base = stored ? stored.replace(/\/$/, '') : PRODUCTION_API;
     return `${base}/api`;
+};
+
+// CRITICAL FIX: Helper to get headers with the correct store hash
+const getHeaders = () => {
+    const storeHash = localStorage.getItem('gridads_store_hash') || '';
+    return {
+        'Content-Type': 'application/json',
+        'x-store-hash': storeHash.replace('store-', '') // Ensure only raw hash is sent
+    };
 };
 
 export const fetchAds = async (): Promise<AdConfig[]> => {
   const apiBase = getApiBase();
   try {
-    const res = await fetch(`${apiBase}/ads`);
+    const res = await fetch(`${apiBase}/ads`, { headers: getHeaders() });
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -23,7 +34,7 @@ export const fetchAds = async (): Promise<AdConfig[]> => {
 export const fetchCategories = async (): Promise<Category[]> => {
   const apiBase = getApiBase();
   try {
-    const res = await fetch(`${apiBase}/categories`);
+    const res = await fetch(`${apiBase}/categories`, { headers: getHeaders() });
     if (!res.ok) throw new Error(`Server responded with ${res.status}`);
     return await res.json();
   } catch (err) {
@@ -37,7 +48,7 @@ export const updateStoreConfig = async (storeHash: string, accessToken: string) 
     try {
         const res = await fetch(`${apiBase}/config`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getHeaders(), // Use new helper
             body: JSON.stringify({ storeHash, accessToken })
         });
         if (!res.ok) {
@@ -47,7 +58,6 @@ export const updateStoreConfig = async (storeHash: string, accessToken: string) 
         return await res.json();
     } catch (err: any) {
         console.error('API Connection Failed:', err);
-        // Detect common network failure modes
         if (err.message === 'Failed to fetch' || err.name === 'TypeError') {
              throw new Error(`Cannot reach server at ${apiBase}. Please check the URL, your network connection, or if the server is running.`);
         }
@@ -59,7 +69,7 @@ export const createAd = async (ad: Partial<AdConfig>): Promise<AdConfig> => {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/ads`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(), // Use new helper
     body: JSON.stringify(ad),
   });
   
@@ -74,7 +84,7 @@ export const updateAd = async (ad: AdConfig): Promise<AdConfig> => {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/ads/${ad.id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getHeaders(), // Use new helper
     body: JSON.stringify(ad),
   });
 
@@ -89,6 +99,7 @@ export const deleteAd = async (id: string): Promise<void> => {
   const apiBase = getApiBase();
   const res = await fetch(`${apiBase}/ads/${id}`, {
     method: 'DELETE',
+    headers: getHeaders(), // Use new helper
   });
 
   if (!res.ok) {
