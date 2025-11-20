@@ -8,10 +8,16 @@ dotenv.config();
 const databaseUrl = process.env.DATABASE_URL;
 const isProduction = process.env.NODE_ENV === 'production';
 
+console.log('Database Configuration:');
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+console.log('- DATABASE_URL exists:', !!databaseUrl);
+console.log('- Using SSL:', isProduction);
+
 let sequelize: Sequelize;
 
 if (databaseUrl) {
   // Use DATABASE_URL (Railway, Heroku, etc.)
+  console.log('Connecting with DATABASE_URL...');
   sequelize = new Sequelize(databaseUrl, {
     dialect: 'postgres',
     logging: false,
@@ -30,6 +36,7 @@ if (databaseUrl) {
   });
 } else {
   // Fall back to individual environment variables (local development)
+  console.log('Connecting with individual env vars...');
   sequelize = new Sequelize(
     process.env.DB_NAME || 'gridads',
     process.env.DB_USER || 'postgres',
