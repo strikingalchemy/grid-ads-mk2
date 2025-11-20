@@ -20,6 +20,18 @@ app.use(express.json());
 
 // -- Routes --
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    service: 'GridAds API',
+    version: '1.0.0'
+  });
+});
+
+// Health Check
+app.get('/health', (req, res) => res.json({ status: 'healthy' }));
+
 // Storefront Public API
 app.get('/storefront/:storeHash/ads', getStorefrontAds);
 
@@ -29,10 +41,7 @@ app.post('/api/ads', createAd);
 app.put('/api/ads/:id', updateAd);
 app.delete('/api/ads/:id', deleteAd);
 app.get('/api/categories', getCategories);
-app.post('/api/config', updateStoreConfig); // New route for saving BC Token
-
-// Health Check
-app.get('/health', (req, res) => res.send('OK'));
+app.post('/api/config', updateStoreConfig);
 
 // Start Server
 const start = async () => {
