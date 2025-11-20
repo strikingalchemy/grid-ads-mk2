@@ -9,46 +9,86 @@ export const getSdk = (req: Request, res: Response) => {
 
   const scriptContent = `
 (function() {
-  console.log('[GridAds] v12.0 (Live External SDK) Initialized');
+  console.log('[GridAds] v13.0 (Live External SDK) Initialized');
   
+  // --- Configuration & Environment Setup ---
   const currentScript = document.currentScript;
-  if (!currentScript) return;
-
-  const srcUrl = new URL(currentScript.src);
-  const storeId = srcUrl.searchParams.get('store_id');
-  const apiBase = srcUrl.origin;
+  const scriptUrl = currentScript ? new URL(currentScript.src) : null;
+  
+  // Determine Store ID
+  let storeId = window.GridAdsConfig?.storeId;
+  if (!storeId && currentScript) {
+      storeId = currentScript.getAttribute('data-store-id') || scriptUrl?.searchParams.get('store_id');
+  }
 
   if (!storeId) {
-    console.error('[GridAds] Missing store_id in script URL.');
+    console.error('[GridAds] Critical Error: Missing store_id. Configure via window.GridAdsConfig or data-store-id attribute.');
     return;
+  }
+
+  // Determine API Base URL
+  let apiEndpoint = window.GridAdsConfig?.apiEndpoint;
+  if (!apiEndpoint && scriptUrl) {
+      // Default to the origin of this script + /storefront/{storeId}/ads
+      apiEndpoint = \`\${scriptUrl.origin}/storefront/\${storeId}/ads\`;
   }
 
   const CONFIG = {
     storeId: storeId,
-    apiEndpoint: \`\${apiBase}/storefront/\${storeId}/ads\`
+    apiEndpoint: apiEndpoint
   };
 
   // --- CORE LOGIC ---
   function detectGrid(root) {
     // Priority 1: Explicit Selectors (Cornerstone, Roots, etc.)
-    const explicitSelectors = ['ul.productGrid', '.rca-productGrid', '.productGrid', '.product-list', '[data-test="product-grid"]'];
+    const explicitSelectors = [
+        'ul.productGrid', '.rca-productGrid', '.productGrid', 
+        '#product-listing-container ul', '[data-product-grid]',
+        '.product-list', '[data-test="product-grid"]'
+    ];
+    
     for (const sel of explicitSelectors) {
         const match = root.querySelector(sel);
         if (match && match.children.length > 0) {
             console.log('[GridAds] Grid detected via selector:', sel);
-            const items = Array.from(match.children).filter(c => c.tagName === 'LI' || c.classList.contains('product') || c.classList.contains('card'));
+            const items = Array.from(match.children).filter(c => {
+                const t = c.tagName;
+                return t === 'LI' || c.classList.contains('product') || c.classList.contains('card');
+            });
             return { container: match, items };
         }
     }
     
     // Priority 2: Visual Density Scan (Fallback)
-    const cards = Array.from(root.querySelectorAll('.product, .card, article'));
-    if (cards.length > 2) {
-        const parent = cards[0].parentElement;
-        if (parent) {
-             console.log('[GridAds] Grid detected via scanning:', parent.className);
-             return { container: parent, items: Array.from(parent.children) };
+    // Find the container with the most "product-like" children
+    let bestContainer = null;
+    let maxItems = 0;
+    
+    const productCandidates = Array.from(root.querySelectorAll('*')).filter(el => {
+        if (!el.className || typeof el.className !== 'string') return false;
+        const c = el.className.toLowerCase();
+        const t = el.tagName;
+        return t !== 'SCRIPT' && t !== 'STYLE' && (c.includes('product') || c.includes('card'));
+    });
+    
+    const parentMap = new Map();
+    productCandidates.forEach(el => {
+        const parent = el.parentElement;
+        if (!parent) return;
+        if (!parentMap.has(parent)) parentMap.set(parent, 0);
+        parentMap.set(parent, parentMap.get(parent) + 1);
+    });
+
+    for (const [parent, count] of parentMap.entries()) {
+        if (count >= 2 && count > maxItems) { // Threshold of 2 items
+            maxItems = count;
+            bestContainer = parent;
         }
+    }
+    
+    if (bestContainer) {
+         console.log('[GridAds] Grid detected via scanning:', bestContainer.className);
+         return { container: bestContainer, items: Array.from(bestContainer.children) };
     }
     
     return null;
@@ -60,30 +100,37 @@ export const getSdk = (req: Request, res: Response) => {
 
     const wrapper = document.createElement(tagName);
     wrapper.id = id;
-    // Clone classes from reference item to match theme layout
-    wrapper.className = refItem ? refItem.className + ' gridads-tile' : 'product gridads-tile';
+    wrapper.classList.add('gridads-tile');
     
-    // Clone layout properties explicitly to ensure it behaves like a grid item
+    // Clone layout properties from reference item
     if (refItem) {
+        wrapper.className = refItem.className + ' gridads-tile';
         const s = window.getComputedStyle(refItem);
-        wrapper.style.float = s.float;
-        wrapper.style.flex = s.flex;
-        wrapper.style.display = s.display;
-        wrapper.style.margin = s.margin;
-        wrapper.style.padding = s.padding;
-        wrapper.style.width = s.width; // Help with sizing
+        ['margin','padding','float','flex','display','width'].forEach(p => wrapper.style[p] = s.getPropertyValue(p));
         wrapper.style.boxSizing = 'border-box';
         
         // Apply custom row spacing if configured
         if (ad.styles && ad.styles.marginBottom) {
-            wrapper.style.setProperty('margin-bottom', ad.styles.marginBottom + 'px', 'important');
+            const cur = parseFloat(s.marginBottom) || 0;
+            wrapper.style.setProperty('margin-bottom', (cur + ad.styles.marginBottom) + 'px', 'important');
         }
+    } else {
+        wrapper.className = 'product gridads-tile';
     }
 
     const s = ad.styles || {};
     const inner = document.createElement('article');
-    inner.className = 'card'; // Standard BC class
-    // Force inner card styling
+    
+    // Try to match inner card structure if possible
+    if (refItem) {
+        const refInner = refItem.querySelector('article') || refItem.querySelector('.card') || refItem.firstElementChild;
+        if(refInner && refInner.tagName !== 'IMG') inner.className = refInner.className;
+        else inner.className = 'card';
+    } else {
+        inner.className = 'card';
+    }
+
+    // Force inner card styling to ensure visibility
     inner.style.cssText = \`
         position: relative; width: 100%; height: 100%; min-height: 100%;
         display: flex; flex-direction: column; overflow: hidden;
@@ -93,17 +140,32 @@ export const getSdk = (req: Request, res: Response) => {
         cursor: pointer; box-sizing: border-box; z-index: 10;
         opacity: 1 !important; visibility: visible !important;
     \`;
+    
     inner.onclick = function() { window.location.href = ad.destinationUrl || '#'; };
 
-    let media = ad.showMedia ? (ad.type === 'video' ? \`<video src="\${ad.mediaUrl}" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:\${ad.mediaFit || 'cover'};z-index:0;"></video>\` : \`<img src="\${ad.mediaUrl}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:\${ad.mediaFit || 'cover'};z-index:0;" />\`) : '';
+    let media = '';
+    if (ad.showMedia) {
+       const fit = ad.mediaFit || 'cover';
+       if (ad.type === 'video') {
+         media = \`<video src="\${ad.mediaUrl}" autoplay muted loop playsinline style="position:absolute;inset:0;width:100%;height:100%;object-fit:\${fit};z-index:0;pointer-events:none;"></video>\`;
+       } else {
+         media = \`<img src="\${ad.mediaUrl}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:\${fit};z-index:0;pointer-events:none;" />\`;
+       }
+    }
+
     const justify = s.verticalAlignment === 'top' ? 'flex-start' : s.verticalAlignment === 'bottom' ? 'flex-end' : 'center';
     const align = s.contentAlignment === 'left' ? 'flex-start' : s.contentAlignment === 'right' ? 'flex-end' : 'center';
-    const content = \`<div style="position:relative; z-index:2; width:100%; flex:1; padding:\${s.contentPadding || 20}px; display:flex; flex-direction:column; justify-content:\${justify}; align-items:\${align}; text-align:\${s.contentAlignment || 'center'};">\` +
-        (ad.showHeadline ? \`<h3 style="margin:0 0 12px; color:\${s.headlineColor}; font-size:\${s.headlineFontSize}px; font-weight:\${s.headlineFontWeight}; line-height:\${s.headlineLineHeight}; letter-spacing:\${s.headlineLetterSpacing}px;">\${ad.headline}</h3>\` : '') +
-        (ad.showDescription ? \`<p style="margin:0 0 24px; color:\${s.descriptionColor}; font-size:\${s.descriptionFontSize}px; font-weight:\${s.descriptionFontWeight}; line-height:\${s.descriptionLineHeight}; letter-spacing:\${s.descriptionLetterSpacing}px;">\${ad.description}</p>\` : '') +
-        (ad.showButton ? \`<span style="display:inline-block; padding:12px 32px; border-radius:999px; background-color:\${s.buttonColor}; color:\${s.buttonTextColor}; font-weight:600; font-size:14px;">\${ad.buttonText}</span>\` : '') +
-      '</div>';
-    const overlay = \`<div style="position:absolute;inset:0;background-color:\${s.overlayColor || '#000'};opacity:\${s.overlayOpacity || 0};z-index:1;"></div>\`;
+    
+    const content = \`
+      <div style="position:relative; z-index:2; width:100%; flex:1; padding:\${s.contentPadding || 20}px; display:flex; flex-direction:column; justify-content:\${justify}; align-items:\${align}; text-align:\${s.contentAlignment || 'center'};">
+        \${ad.showHeadline ? \`<h3 style="margin:0 0 12px 0; color:\${s.headlineColor}; font-size:\${s.headlineFontSize}px; font-weight:\${s.headlineFontWeight}; line-height:\${s.headlineLineHeight}; letter-spacing:\${s.headlineLetterSpacing}px; font-family: inherit;">\${ad.headline}</h3>\` : ''}
+        \${ad.showDescription ? \`<p style="margin:0 0 24px 0; color:\${s.descriptionColor}; font-size:\${s.descriptionFontSize}px; font-weight:\${s.descriptionFontWeight}; line-height:\${s.descriptionLineHeight}; letter-spacing:\${s.descriptionLetterSpacing}px; font-family: inherit;">\${ad.description}</p>\` : ''}
+        \${ad.showButton ? \`<span style="display:inline-block; text-decoration:none; padding:12px 32px; border-radius:999px; background-color:\${s.buttonColor}; color:\${s.buttonTextColor}; font-weight:600; font-size:14px; font-family: inherit;">\${ad.buttonText}</span>\` : ''}
+      </div>
+    \`;
+    
+    const overlay = \`<div style="position:absolute;inset:0;background-color:\${s.overlayColor || '#000'};opacity:\${s.overlayOpacity || 0};z-index:1;pointer-events:none;"></div>\`;
+
     inner.innerHTML = media + overlay + content;
     wrapper.appendChild(inner);
     return wrapper;
@@ -111,11 +173,16 @@ export const getSdk = (req: Request, res: Response) => {
 
   function syncHeights() {
       requestAnimationFrame(() => {
-          document.querySelectorAll('.gridads-tile').forEach(ad => {
-              const sibling = ad.nextElementSibling || ad.previousElementSibling;
-              // Match height of sibling product card if available
-              if(sibling && sibling.offsetHeight > 0 && Math.abs(ad.offsetHeight - sibling.offsetHeight) > 2) {
+          const ads = document.querySelectorAll('.gridads-tile');
+          ads.forEach(ad => {
+              const parent = ad.parentElement;
+              if(!parent) return;
+              // Find a non-ad sibling to match height
+              const sibling = Array.from(parent.children).find(c => !c.classList.contains('gridads-tile') && c.offsetHeight > 0);
+              if (sibling && Math.abs(ad.offsetHeight - sibling.offsetHeight) > 2) {
                   ad.style.height = sibling.offsetHeight + 'px';
+                  const inner = ad.querySelector('article') || ad.firstElementChild;
+                  if(inner) inner.style.height = '100%';
               }
           });
       });
@@ -129,17 +196,27 @@ export const getSdk = (req: Request, res: Response) => {
       }
       
       const { container, items } = res;
-      const refItem = items[0];
+      // Find a valid reference item (not a script, not an ad)
+      const refItem = items.find(i => !i.classList.contains('gridads-tile') && i.tagName !== 'SCRIPT');
+      if (!refItem) return;
+      
       const tagName = refItem.tagName;
 
       ads.forEach(ad => {
+          if (ad.status !== 'active' || document.getElementById('gridads-' + ad.id)) return;
+          
           const el = createAd(ad, tagName, refItem);
           if(!el) return;
+
           const pos = Math.max(0, ad.position - 1);
-          if(pos < items.length) container.insertBefore(el, items[pos]);
-          else container.appendChild(el);
+          if(pos < items.length) {
+              // Check if we are inserting into the correct container
+              if(items[pos].parentNode === container) container.insertBefore(el, items[pos]);
+          } else {
+              container.appendChild(el);
+          }
       });
-      setTimeout(syncHeights, 100);
+      setTimeout(syncHeights, 150);
   }
 
   async function init() {
@@ -149,16 +226,33 @@ export const getSdk = (req: Request, res: Response) => {
         if(!res.ok) throw new Error(\`Server returned \${res.status}\`);
         
         const liveData = await res.json();
-        console.log('[GridAds] Campaigns found:', liveData.length);
+        console.log(\`[GridAds] \${liveData.length} active campaigns found.\`);
         
         if(Array.isArray(liveData) && liveData.length > 0) {
-            if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => run(liveData));
-            else run(liveData);
+            if(document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => run(liveData));
+            } else {
+                run(liveData);
+            }
             
-            // Observer to handle infinite scroll / dynamic loading
+            // Observer to handle infinite scroll / dynamic loading / client-side routing
             let t;
-            new MutationObserver(() => { clearTimeout(t); t = setTimeout(() => { run(liveData); syncHeights(); }, 300); }).observe(document.body, { childList: true, subtree: true });
-            window.addEventListener('resize', () => syncHeights());
+            const observer = new MutationObserver((mutations) => { 
+                let shouldRun = false;
+                for(const m of mutations) {
+                    if(m.addedNodes.length > 0) shouldRun = true;
+                }
+                if(shouldRun) {
+                    clearTimeout(t); 
+                    t = setTimeout(() => { run(liveData); syncHeights(); }, 300); 
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+            
+            window.addEventListener('resize', () => {
+                clearTimeout(t);
+                t = setTimeout(syncHeights, 150);
+            });
         }
       } catch(e) { console.error('[GridAds] Connection Failed:', e); }
   }
