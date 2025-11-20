@@ -6,7 +6,7 @@ import sequelize from './config/database';
 import { getAds, createAd, updateAd, deleteAd, getStorefrontAds, getCategories, updateStoreConfig } from './controllers/adController';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Allow all origins for now, but ensure methods are allowed
 app.use(cors({
