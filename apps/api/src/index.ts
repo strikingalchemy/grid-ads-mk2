@@ -40,11 +40,12 @@ const start = async () => {
     await sequelize.sync({ alter: true });
     console.log('Database connected & synced');
     
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`API Server running on port ${PORT}`);
     });
   } catch (error) {
     console.error('Unable to connect to the database:', error);
+    process.exit(1);
   }
 };
 
